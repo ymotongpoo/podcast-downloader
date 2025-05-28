@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -32,6 +33,7 @@ type Item struct {
 	Title     string    `xml:"title"`
 	PubDate   string    `xml:"pubDate"`
 	Enclosure Enclosure `xml:"enclosure"`
+	Duration  string    `xml:"duration"`
 }
 
 // Enclosure はエピソード内の音声ファイル情報を表します
@@ -234,7 +236,11 @@ func processTask(task Task, validate bool) error {
 		
 		// ファイルの検証（--validate オプションが指定されている場合）
 		if validate {
-			fmt.Println("ファイル検証機能はまだ実装されていません")
+			if err := validateFile(filePath, item.Duration); err != nil {
+				fmt.Printf("ファイル検証に失敗しました: %v\n", err)
+			} else {
+				fmt.Printf("ファイル検証に成功しました: %s\n", filePath)
+			}
 		}
 	}
 	
@@ -286,4 +292,77 @@ func downloadFile(url, filePath string) error {
 
 	_, err = io.Copy(file, resp.Body)
 	return err
+}
+
+// validateFile はダウンロードしたファイルを検証します
+func validateFile(filePath, expectedDuration string) error {
+	// ffmpegが利用可能かチェック
+	if _, err := exec.LookPath("ffmpeg"); err != nil {
+		return fmt.Errorf("ffmpegが見つかりません: %v", err)
+	}
+	
+	// ffprobeを使用してファイルの長さを取得
+	cmd := exec.Command("ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "default=noprint_wrappers=1:nokey=1", filePath)
+	output, err := cmd.Output()
+	if err != nil {
+		return fmt.Errorf("ffprobeの実行に失敗しました: %v", err)
+	}
+	
+	// 出力から秒数を取得
+	durationStr := strings.TrimSpace(string(output))
+	duration, err := time.ParseDuration(durationStr + "s")
+	if err != nil {
+		return fmt.Errorf("ファイルの長さの解析に失敗しました: %v", err)
+	}
+	
+	// 期待される長さが指定されていない場合は検証をスキップ
+	if expectedDuration == "" {
+		fmt.Println("期待される長さが指定されていないため、検証をスキップします")
+		return nil
+	}
+	
+	// 期待される長さを解析
+	// フォーマットは "HH:MM:SS" または "MM:SS" または秒数
+	var expectedSeconds float64
+	
+	if strings.Contains(expectedDuration, ":") {
+		parts := strings.Split(expectedDuration, ":")
+		if len(parts) == 3 {
+			// HH:MM:SS
+			hours := parseFloat(parts[0])
+			minutes := parseFloat(parts[1])
+			seconds := parseFloat(parts[2])
+			expectedSeconds = hours*3600 + minutes*60 + seconds
+		} else if len(parts) == 2 {
+			// MM:SS
+			minutes := parseFloat(parts[0])
+			seconds := parseFloat(parts[1])
+			expectedSeconds = minutes*60 + seconds
+		} else {
+			return fmt.Errorf("期待される長さのフォーマットが不正です: %s", expectedDuration)
+		}
+	} else {
+		// 秒数
+		expectedSeconds = parseFloat(expectedDuration)
+	}
+	
+	// 実際の長さと期待される長さを比較
+	actualSeconds := duration.Seconds()
+	
+	// 5%の誤差を許容
+	tolerance := expectedSeconds * 0.05
+	if actualSeconds < expectedSeconds-tolerance || actualSeconds > expectedSeconds+tolerance {
+		return fmt.Errorf("ファイルの長さが期待と異なります: 期待=%f秒, 実際=%f秒", expectedSeconds, actualSeconds)
+	}
+	
+	return nil
+}
+
+// parseFloat は文字列を浮動小数点数に変換します
+func parseFloat(s string) float64 {
+	f, err := time.ParseDuration(s + "s")
+	if err != nil {
+		return 0
+	}
+	return f.Seconds()
 }
