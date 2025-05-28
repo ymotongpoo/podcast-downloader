@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/xml"
+	"flag"
 	"fmt"
 	"io"
 	"net/http"
@@ -36,30 +37,60 @@ type Enclosure struct {
 }
 
 func main() {
-	// コマンドライン引数の処理
-	if len(os.Args) < 2 {
-		fmt.Println("使用方法: podcast-downloader <RSS URL> [保存先ディレクトリ]")
+	// コマンドラインフラグの定義
+	configFile := flag.String("c", "", "設定ファイルのパス")
+	flag.StringVar(configFile, "config", "", "設定ファイルのパス")
+	
+	rssURL := flag.String("u", "", "PodcastのRSSフィードのURL")
+	flag.StringVar(rssURL, "url", "", "PodcastのRSSフィードのURL")
+	
+	saveDir := flag.String("d", ".", "ダウンロードした音声ファイルを保存する先のディレクトリ")
+	flag.StringVar(saveDir, "dest", ".", "ダウンロードした音声ファイルを保存する先のディレクトリ")
+	
+	sinceDate := flag.String("s", "", "指定された日付（RFC3999形式）以降のファイルしかダウンロードしない")
+	flag.StringVar(sinceDate, "since", "", "指定された日付（RFC3999形式）以降のファイルしかダウンロードしない")
+	
+	fileFormat := flag.String("f", "{channel}-{date}-{episode}.mp3", "ダウンロードするファイル名のフォーマット")
+	flag.StringVar(fileFormat, "format", "{channel}-{date}-{episode}.mp3", "ダウンロードするファイル名のフォーマット")
+	
+	validate := flag.Bool("validate", false, "ダウンロードしたファイルがRSSフィードで指定された秒数あるかを確認する")
+	
+	flag.Parse()
+
+	// URLが指定されていない場合はエラー
+	if *configFile == "" && *rssURL == "" {
+		fmt.Println("エラー: 設定ファイル(-c/--config)またはRSS URL(-u/--url)のいずれかを指定してください")
+		flag.Usage()
 		os.Exit(1)
 	}
 
-	rssURL := os.Args[1]
-
-	// 保存先ディレクトリの設定（デフォルトはカレントディレクトリ）
-	saveDir := "."
-	if len(os.Args) > 2 {
-		saveDir = os.Args[2]
+	// 設定ファイルが指定されている場合は、そちらを優先
+	if *configFile != "" {
+		fmt.Println("設定ファイルからの読み込みはまだ実装されていません")
+		os.Exit(1)
 	}
 
 	// 保存先ディレクトリが存在しない場合は作成
-	if _, err := os.Stat(saveDir); os.IsNotExist(err) {
-		if err := os.MkdirAll(saveDir, 0755); err != nil {
+	if _, err := os.Stat(*saveDir); os.IsNotExist(err) {
+		if err := os.MkdirAll(*saveDir, 0755); err != nil {
 			fmt.Printf("ディレクトリの作成に失敗しました: %v\n", err)
 			os.Exit(1)
 		}
 	}
 
+	// sinceDate が指定されている場合は解析
+	var since time.Time
+	if *sinceDate != "" {
+		var err error
+		since, err = time.Parse(time.RFC3339, *sinceDate)
+		if err != nil {
+			fmt.Printf("日付の解析に失敗しました: %v\n", err)
+			os.Exit(1)
+		}
+	}
+
 	// RSSフィードの取得
-	rss, err := fetchRSS(rssURL)
+	rss, err := fetchRSS(*rssURL)
 	if err != nil {
 		fmt.Printf("RSSフィードの取得に失敗しました: %v\n", err)
 		os.Exit(1)
@@ -80,14 +111,26 @@ func main() {
 			}
 		}
 
+		// sinceDate が指定されていて、エピソードの日付がそれより前の場合はスキップ
+		if !since.IsZero() && pubDate.Before(since) {
+			fmt.Printf("エピソード「%s」は指定された日付より前のためスキップします\n", item.Title)
+			continue
+		}
+
 		dateStr := pubDate.Format("20060102")
 
 		// ファイル名の作成
 		// 半角空白と全角空白を_に置換
 		channelTitle := strings.ReplaceAll(strings.ReplaceAll(rss.Channel.Title, " ", "_"), "　", "_")
 		episodeTitle := strings.ReplaceAll(strings.ReplaceAll(item.Title, " ", "_"), "　", "_")
-		fileName := fmt.Sprintf("%s-%s-%s.mp3", channelTitle, dateStr, episodeTitle)
-		filePath := filepath.Join(saveDir, fileName)
+		
+		// ファイル名のフォーマットを適用
+		fileName := *fileFormat
+		fileName = strings.ReplaceAll(fileName, "{channel}", channelTitle)
+		fileName = strings.ReplaceAll(fileName, "{date}", dateStr)
+		fileName = strings.ReplaceAll(fileName, "{episode}", episodeTitle)
+		
+		filePath := filepath.Join(*saveDir, fileName)
 
 		// 音声ファイルのダウンロード
 		fmt.Printf("ダウンロード中: %s\n", item.Enclosure.URL)
@@ -97,6 +140,11 @@ func main() {
 		}
 
 		fmt.Printf("ダウンロード完了: %s\n", filePath)
+		
+		// ファイルの検証（--validate オプションが指定されている場合）
+		if *validate {
+			fmt.Println("ファイル検証機能はまだ実装されていません")
+		}
 	}
 }
 
