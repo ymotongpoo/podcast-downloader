@@ -56,10 +56,10 @@ tasks:
   - url: https://feeds.megaphone.fm/unagerorin
     destination: /home/ymotongpoo/downloads/mayurika
     since: 2025-05-24T00:00:00+09:00
-    format: "{title}-{date}-{episode}.mp3"
+    format: "{channel}-{date}-{episode}.mp3"
   - url: https://feeds.megaphone.fm/FNCOMMUNICATIONSINC3656403561
     destination: /home/ymotongpoo/downloads/haruhiko
-    format: "{title}-{date}-{episode}.mp3"
+    format: "{channel}-{date}-{episode}.mp3"
 ```
 
 直接オプションを指定する場合と異なり、設定ファイルの場合には1つのRSSを1つのタスクとして設定し、複数のPodcastに対してファイルのダウンロード作業を指定できます。
