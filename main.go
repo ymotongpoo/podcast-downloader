@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"gopkg.in/yaml.v3"
@@ -81,9 +82,12 @@ func main() {
 			os.Exit(1)
 		}
 		
-		// 設定ファイルに基づいて各タスクを実行
+		// 設定ファイルに基づいて各タスクを並列実行
+		var wg sync.WaitGroup
+		taskErrors := make(chan error, len(config.Tasks))
+		
 		for i, task := range config.Tasks {
-			fmt.Printf("タスク %d/%d を実行中...\n", i+1, len(config.Tasks))
+			wg.Add(1)
 			
 			// タスクのデフォルト値を設定
 			if task.Destination == "" {
@@ -93,10 +97,24 @@ func main() {
 				task.Format = "{channel}-{date}-{episode}.mp3"
 			}
 			
-			// タスクを実行
-			if err := processTask(task, *validate); err != nil {
-				fmt.Printf("タスク %d の実行に失敗しました: %v\n", i+1, err)
-			}
+			// タスクを並列実行
+			go func(taskNum int, t Task) {
+				defer wg.Done()
+				fmt.Printf("タスク %d/%d を実行中...\n", taskNum+1, len(config.Tasks))
+				
+				if err := processTask(t, *validate); err != nil {
+					taskErrors <- fmt.Errorf("タスク %d の実行に失敗しました: %v", taskNum+1, err)
+				}
+			}(i, task)
+		}
+		
+		// すべてのタスクの完了を待つ
+		wg.Wait()
+		close(taskErrors)
+		
+		// エラーがあれば表示
+		for err := range taskErrors {
+			fmt.Println(err)
 		}
 		
 		return
